@@ -35,6 +35,9 @@
       background: #fff; color: #172033; text-align: left; cursor: pointer;
     }
     .chat-select[aria-current="true"] { border-color: #5c6ac4; background: #f4f5ff; }
+    .chat-group { min-width: 0; }
+    .chat-group-title { margin: 16px 0 8px; color: #687386; font-size: .82rem; font-weight: 700; }
+    .chat-group-list { display: grid; gap: 8px; }
     .conversation { display: flex; min-width: 0; flex-direction: column; padding: 24px; }
     .conversation-header { padding-bottom: 16px; border-bottom: 1px solid #e7eaf2; }
     .conversation-header h2 { margin: 0; font-size: 1.25rem; }
@@ -66,6 +69,11 @@
       padding: 12px 18px; border: 0; border-radius: 10px; background: #5c6ac4;
       color: #fff; font: inherit; font-weight: 700; cursor: pointer;
     }
+    .backup-button {
+      width: 100%; margin-top: 18px; padding: 10px 12px; border: 1px solid #cbd5e1;
+      border-radius: 8px; background: #fff; color: #172033; font: inherit; font-weight: 700; cursor: pointer;
+    }
+    #backupStatus { min-height: 1.5em; margin: 8px 0 0; font-size: .85rem; }
     .logout { margin-top: 20px; background: transparent; color: #4c59ad; padding: 0; }
     .empty { margin: auto; color: #687386; text-align: center; }
     @media (max-width: 640px) {
@@ -73,6 +81,7 @@
       .inbox { grid-template-columns: 1fr; min-height: calc(100vh - 24px); }
       .sidebar { padding: 18px; border-right: 0; border-bottom: 1px solid #e7eaf2; }
       #chatList { display: flex; max-width: 100%; overflow-x: auto; }
+      .chat-group { flex: 0 0 auto; }
       .chat-select { width: auto; flex: 0 0 auto; }
       .conversation { min-height: 460px; padding: 18px; }
       #messages { max-height: 45vh; }
@@ -86,6 +95,8 @@
       <p class="subtle">Verified Reg nos. and existing chats are listed here.</p>
       <div id="chatList" aria-label="Chats"></div>
       <p class="subtle" id="noChats">No verified registrations or chats found.</p>
+      <button class="backup-button" id="backupChats" type="button">Download chat backup</button>
+      <p class="subtle" id="backupStatus" role="status" aria-live="polite"></p>
       <button class="logout" id="logout" type="button">Log out</button>
     </aside>
     <section class="conversation" aria-label="Selected chat">
@@ -110,7 +121,7 @@
         <p class="empty">Choose a Reg no. to view its conversation.</p>
       </div>
       <form id="replyForm" hidden>
-        <input id="replyInput" type="text" aria-label="Your reply" placeholder="Write a reply..." required autocomplete="off">
+        <input id="replyInput" type="text" aria-label="Your reply" placeholder="Write a reply..." maxlength="4000" required autocomplete="off">
         <button class="send" type="submit">Send</button>
       </form>
     </section>
@@ -119,12 +130,13 @@
   <script>
     document.body.hidden = true;
     const supabaseUrl = 'https://knjrhohyesqxsoessmnr.supabase.co';
-    const supabasePublishableKey = 'sb_publishable_XgMa767xmOW0J28GXqxO3w_HDqCGV_2';
+    const supabasePublishableKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtuanJob2h5ZXNxeHNvZXNzbW5yIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTA2NzAxNDQsImV4cCI6MjEwNjI0NjE0NH0.rI26D8ZACBDkKtQ7slJE3kOhDeV3LXfRT7astsPo61o';
     const supabaseClient = window.supabase.createClient(supabaseUrl, supabasePublishableKey);
 
     const prefix = 'registration-chat:';
     const chatList = document.getElementById('chatList');
     const noChats = document.getElementById('noChats');
+    const backupStatus = document.getElementById('backupStatus');
     const messages = document.getElementById('messages');
     const title = document.getElementById('conversationTitle');
     const replyForm = document.getElementById('replyForm');
@@ -138,21 +150,18 @@
     const documentPreviewContainer = document.getElementById('documentPreviewContainer');
     const documentStatus = document.getElementById('documentStatus');
     const removeDocument = document.getElementById('removeDocument');
-    let activeKey = '';
+    let activeChat = null;
     let activeDocumentUrl = '';
-
-    function documentKey() {
-      return activeKey ? `registration-document:${activeKey.slice(prefix.length)}` : '';
-    }
+    let legacyImportComplete = false;
 
     async function renderDocumentManager() {
-      documentManager.hidden = !activeKey;
+      documentManager.hidden = !activeChat;
       documentCurrent.replaceChildren();
       documentPreviewContainer.replaceChildren();
       removeDocument.hidden = true;
       activeDocumentUrl = '';
-      if (!activeKey) return;
-      const regNo = activeKey.slice(prefix.length);
+      if (!activeChat) return;
+      const regNo = activeChat.regNo;
       const { data: registration, error } = await supabaseClient
         .from('registrations')
         .select('url')
@@ -204,11 +213,130 @@
       }
     }
 
-    function renderMessages() {
+    async function fetchAllChatMessages() {
+      const pageSize = 1000;
+      const rows = [];
+      for (let offset = 0; ; offset += pageSize) {
+        const { data, error } = await supabaseClient
+          .from('chat_messages')
+          .select('reg_no, class_name, sender, message, created_at')
+          .order('class_name')
+          .order('reg_no')
+          .order('created_at')
+          .range(offset, offset + pageSize - 1);
+        if (error) throw error;
+        rows.push(...(data || []));
+        if (!data || data.length < pageSize) return rows;
+      }
+    }
+
+    async function importLegacyChats(registrations) {
+      if (legacyImportComplete) return;
+      const registrationsByNumber = new Map();
+      for (const registration of registrations) {
+        const matches = registrationsByNumber.get(registration.reg_no) || [];
+        matches.push(registration);
+        registrationsByNumber.set(registration.reg_no, matches);
+      }
+
+      const rows = [];
+      for (let index = 0; index < localStorage.length; index += 1) {
+        const storageKey = localStorage.key(index);
+        if (!storageKey || !storageKey.startsWith(prefix)) continue;
+        const regNo = storageKey.slice(prefix.length);
+        const matches = registrationsByNumber.get(regNo) || [];
+        if (matches.length !== 1) continue;
+        const className = matches[0].class_name;
+        readMessages(storageKey).forEach((item, messageIndex) => {
+          const legacyMessage = typeof item === 'string' ? { text: item } : item;
+          if (!legacyMessage || typeof legacyMessage.text !== 'string' || !legacyMessage.text.trim()) return;
+          const legacyDate = Number.isFinite(legacyMessage.time) ? new Date(legacyMessage.time) : null;
+          rows.push({
+            reg_no: regNo,
+            class_name: className,
+            sender: legacyMessage.sender === 'support' ? 'support' : 'visitor',
+            message: legacyMessage.text.trim(),
+            legacy_id: `local:${encodeURIComponent(className)}:${encodeURIComponent(regNo)}:${messageIndex}`,
+            ...(legacyDate && Number.isFinite(legacyDate.getTime()) ? { created_at: legacyDate.toISOString() } : {})
+          });
+        });
+      }
+
+      const batchSize = 500;
+      for (let offset = 0; offset < rows.length; offset += batchSize) {
+        const { error } = await supabaseClient
+          .from('chat_messages')
+          .upsert(rows.slice(offset, offset + batchSize), { onConflict: 'legacy_id', ignoreDuplicates: true });
+        if (error) throw error;
+      }
+      legacyImportComplete = true;
+      if (rows.length) {
+        backupStatus.textContent = `Imported existing messages from this browser (${rows.length} checked).`;
+      }
+    }
+
+    document.getElementById('backupChats').addEventListener('click', async () => {
+      backupStatus.textContent = 'Preparing backup...';
+      try {
+        const rows = await fetchAllChatMessages();
+        const groupedChats = new Map();
+        for (const row of rows) {
+          const key = `${row.class_name}\u0000${row.reg_no}`;
+          const chat = groupedChats.get(key) || {
+            className: row.class_name,
+            registrationNumber: row.reg_no,
+            messages: []
+          };
+          chat.messages.push({
+            sender: row.sender,
+            text: row.message,
+            time: Date.parse(row.created_at),
+            createdAt: row.created_at
+          });
+          groupedChats.set(key, chat);
+        }
+
+        const chats = [...groupedChats.values()];
+        const backup = {
+          format: 'registration-chat-backup',
+          version: 1,
+          createdAt: new Date().toISOString(),
+          chats
+        };
+        const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
+        const downloadUrl = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = downloadUrl;
+        link.download = `chat-backup-${new Date().toISOString().slice(0, 10)}.json`;
+        link.click();
+        window.setTimeout(() => URL.revokeObjectURL(downloadUrl), 1000);
+        backupStatus.textContent = `Backed up ${chats.length} chats and ${rows.length} messages.`;
+      } catch (error) {
+        console.error('Chat backup failed:', error);
+        backupStatus.textContent = 'Could not download the Supabase chat backup.';
+      }
+    });
+
+    async function renderMessages() {
       messages.replaceChildren();
-      if (!activeKey) return;
-      const history = readMessages(activeKey);
-      if (!history.length) {
+      if (!activeChat) return;
+      const selectedChat = activeChat;
+      const { data: history, error } = await supabaseClient
+        .from('chat_messages')
+        .select('sender, message, created_at')
+        .eq('reg_no', selectedChat.regNo)
+        .eq('class_name', selectedChat.className)
+        .order('created_at')
+        .order('id');
+      if (activeChat !== selectedChat) return;
+      if (error) {
+        const failed = document.createElement('p');
+        failed.className = 'empty';
+        failed.textContent = 'Could not load this chat. Try again.';
+        messages.append(failed);
+        return;
+      }
+      if (!history || !history.length) {
         const empty = document.createElement('p');
         empty.className = 'empty';
         empty.textContent = 'No messages yet.';
@@ -216,13 +344,13 @@
         return;
       }
       history.forEach((item) => {
-        const fromSupport = typeof item === 'object' && item.sender === 'support';
+        const fromSupport = item.sender === 'support';
         const bubble = document.createElement('p');
         bubble.className = `message${fromSupport ? '' : ' visitor'}`;
         const sender = document.createElement('span');
         sender.className = 'message-meta';
         sender.textContent = fromSupport ? 'You' : 'Visitor';
-        bubble.append(sender, document.createTextNode(typeof item === 'string' ? item : item.text));
+        bubble.append(sender, document.createTextNode(item.message));
         messages.append(bubble);
       });
       messages.scrollTop = messages.scrollHeight;
@@ -231,7 +359,8 @@
     async function renderChatList() {
       const { data: registrations, error } = await supabaseClient
         .from('registrations')
-        .select('reg_no')
+        .select('reg_no, class_name')
+        .order('class_name')
         .order('reg_no');
       if (error) {
         chatList.replaceChildren();
@@ -239,28 +368,48 @@
         noChats.hidden = false;
         return;
       }
-      const regNos = registrations.map((registration) => registration.reg_no);
       chatList.replaceChildren();
-      noChats.hidden = regNos.length > 0;
+      noChats.hidden = registrations.length > 0;
       noChats.textContent = 'No registrations found.';
-      regNos.forEach((regNo) => {
-        const key = `${prefix}${regNo}`;
+      let currentGroup = null;
+      for (const registration of registrations) {
+        if (!currentGroup || currentGroup.className !== registration.class_name) {
+          const group = document.createElement('section');
+          group.className = 'chat-group';
+          const groupTitle = document.createElement('h2');
+          groupTitle.className = 'chat-group-title';
+          groupTitle.textContent = `Class ${registration.class_name}`;
+          const groupList = document.createElement('div');
+          groupList.className = 'chat-group-list';
+          group.append(groupTitle, groupList);
+          chatList.append(group);
+          currentGroup = { className: registration.class_name, list: groupList };
+        }
+
+        const selected = activeChat?.regNo === registration.reg_no
+          && activeChat?.className === registration.class_name;
         const button = document.createElement('button');
         button.className = 'chat-select';
         button.type = 'button';
-        button.textContent = `Reg no. ${regNo}`;
-        button.setAttribute('aria-current', String(key === activeKey));
+        button.textContent = `Reg no. ${registration.reg_no}`;
+        button.setAttribute('aria-current', String(selected));
         button.addEventListener('click', () => {
-          activeKey = key;
-          title.textContent = `Chat for Reg no. ${regNo}`;
+          activeChat = { regNo: registration.reg_no, className: registration.class_name };
+          title.textContent = `Class ${registration.class_name}, Reg no. ${registration.reg_no}`;
           replyForm.hidden = false;
           renderChatList();
           renderMessages();
           renderDocumentManager();
           replyInput.focus();
         });
-        chatList.append(button);
-      });
+        currentGroup.list.append(button);
+      }
+      try {
+        await importLegacyChats(registrations);
+      } catch (importError) {
+        console.error('Existing local chats could not be imported:', importError);
+        backupStatus.textContent = 'Could not import existing chats from this browser.';
+      }
     }
 
     async function saveDocumentUrl(regNo, url) {
@@ -277,7 +426,7 @@
     documentForm.addEventListener('submit', async (event) => {
       event.preventDefault();
       const file = documentFile.files[0];
-      if (!file || !activeKey) return;
+      if (!file || !activeChat) return;
       if (!file.name.toLowerCase().endsWith('.pdf') && file.type !== 'application/pdf') {
         documentStatus.textContent = 'Please choose a PDF file.';
         return;
@@ -287,7 +436,7 @@
         return;
       }
 
-      const regNo = activeKey.slice(prefix.length);
+      const regNo = activeChat.regNo;
       const safeRegNo = regNo.replace(/[^a-zA-Z0-9_-]/g, '_');
       const safeFileName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
       const objectPath = `${safeRegNo}/${crypto.randomUUID()}-${safeFileName}`;
@@ -317,7 +466,7 @@
 
     documentLinkForm.addEventListener('submit', async (event) => {
       event.preventDefault();
-      if (!activeKey) return;
+      if (!activeChat) return;
       let parsedUrl;
       try {
         parsedUrl = new URL(documentUrl.value.trim());
@@ -330,7 +479,7 @@
         return;
       }
       try {
-        await saveDocumentUrl(activeKey.slice(prefix.length), parsedUrl.href);
+        await saveDocumentUrl(activeChat.regNo, parsedUrl.href);
         documentStatus.textContent = 'Document link backed up.';
         documentUrl.value = '';
         await renderDocumentManager();
@@ -341,9 +490,9 @@
     });
 
     removeDocument.addEventListener('click', async () => {
-      if (!activeKey) return;
+      if (!activeChat) return;
       try {
-        const regNo = activeKey.slice(prefix.length);
+        const regNo = activeChat.regNo;
         const savedUrl = activeDocumentUrl;
         const parsedUrl = new URL(savedUrl);
         const storagePathPrefix = '/storage/v1/object/public/student-documents/';
@@ -361,28 +510,30 @@
       }
     });
 
-    replyForm.addEventListener('submit', (event) => {
+    replyForm.addEventListener('submit', async (event) => {
       event.preventDefault();
       const text = replyInput.value.trim();
-      if (!text || !activeKey) return;
-      const history = readMessages(activeKey);
-      history.push({ sender: 'support', text, time: Date.now() });
+      if (!text || !activeChat) return;
       try {
-        localStorage.setItem(activeKey, JSON.stringify(history));
-      } catch {
-        window.alert('Could not save this reply in this browser.');
+        const { error } = await supabaseClient.from('chat_messages').insert({
+          reg_no: activeChat.regNo,
+          class_name: activeChat.className,
+          sender: 'support',
+          message: text
+        });
+        if (error) throw error;
+      } catch (error) {
+        console.error('Support reply failed:', error);
+        window.alert('Could not save this reply to Supabase.');
         return;
       }
       replyInput.value = '';
       renderMessages();
     });
 
-    window.addEventListener('storage', (event) => {
-      if (event.key === null || event.key.startsWith(prefix)) {
-        renderChatList();
-        renderMessages();
-      }
-    });
+    window.setInterval(() => {
+      if (activeChat) renderMessages().catch((error) => console.error('Chat refresh failed:', error));
+    }, 5000);
 
     document.getElementById('logout').addEventListener('click', async () => {
       await supabaseClient.auth.signOut();

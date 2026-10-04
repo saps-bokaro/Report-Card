@@ -355,7 +355,13 @@
       <button class="chat-close" id="closeChat" type="button" aria-label="Close help chat">×</button>
     </div>
     <form id="chatIdentityForm">
-      <p class="intro">Enter your Reg no. to open your saved chat.</p>
+      <p class="intro" id="chatIdentityStatus">Choose your class and enter your Reg no. to open your chat.</p>
+      <div class="field">
+        <label for="chatClassInput">Class</label>
+        <select id="chatClassInput" required>
+          <option value="" selected disabled>Loading classes...</option>
+        </select>
+      </div>
       <div class="field">
         <label for="chatRegNo">Reg no.</label>
         <input id="chatRegNo" type="text" required autocomplete="off" placeholder="Enter your Reg no.">
@@ -366,10 +372,10 @@
       <p class="chat-note" id="chatAccount"></p>
       <div class="chat-history" id="chatHistory" role="log" aria-live="polite"></div>
       <form id="chatMessageForm" class="chat-form-row">
-        <input id="chatMessageInput" type="text" aria-label="Your message" placeholder="Type a message..." required autocomplete="off">
+        <input id="chatMessageInput" type="text" aria-label="Your message" placeholder="Type a message..." maxlength="4000" required autocomplete="off">
         <button type="submit">Send</button>
       </form>
-      <p class="chat-note">Chat history is saved only in this browser on this device.</p>
+      <p class="chat-note">Chat history is saved online and available on other devices.</p>
       <button class="chat-change" id="changeChatRegNo" type="button">Use a different Reg no.</button>
     </div>
   </section>
@@ -401,9 +407,10 @@
     const app = document.getElementById('app');
     const detailsForm = document.getElementById('detailsForm');
     const classInput = document.getElementById('classInput');
+    const chatClassInput = document.getElementById('chatClassInput');
     const regNoInput = document.getElementById('regNoInput');
     const supabaseUrl = 'https://knjrhohyesqxsoessmnr.supabase.co';
-    const supabasePublishableKey = 'sb_publishable_XgMa767xmOW0J28GXqxO3w_HDqCGV_2';
+    const supabasePublishableKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtuanJob2h5ZXNxeHNvZXNzbW5yIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTA2NzAxNDQsImV4cCI6MjEwNjI0NjE0NH0.rI26D8ZACBDkKtQ7slJE3kOhDeV3LXfRT7astsPo61o';
     const supabaseClient = supabaseUrl && supabasePublishableKey
       ? window.supabase.createClient(supabaseUrl, supabasePublishableKey)
       : null;
@@ -418,12 +425,15 @@
         if (error) throw error;
 
         classInput.replaceChildren(new Option('Select a class', ''));
+        chatClassInput.replaceChildren(new Option('Select a class', ''));
         for (const row of data || []) {
           classInput.add(new Option(row.class_name, row.class_name));
+          chatClassInput.add(new Option(row.class_name, row.class_name));
         }
       } catch (error) {
         console.error('Class list could not be loaded:', error);
         classInput.replaceChildren(new Option('Could not load classes', ''));
+        chatClassInput.replaceChildren(new Option('Could not load classes', ''));
       }
     }
 
@@ -590,24 +600,18 @@
 
     const chatPanel = document.getElementById('helpChat');
     const chatIdentityForm = document.getElementById('chatIdentityForm');
+    const chatIdentityStatus = document.getElementById('chatIdentityStatus');
+    const chatClass = document.getElementById('chatClassInput');
     const chatRegNo = document.getElementById('chatRegNo');
     const chatConversation = document.getElementById('chatConversation');
     const chatHistory = document.getElementById('chatHistory');
     const chatMessageForm = document.getElementById('chatMessageForm');
     const chatMessageInput = document.getElementById('chatMessageInput');
     const chatAccount = document.getElementById('chatAccount');
-    let activeChatKey = '';
+    let activeChat = null;
 
-    function showChatHistory() {
+    function renderChatHistory(messages) {
       chatHistory.replaceChildren();
-      let messages = [];
-      try {
-        messages = JSON.parse(localStorage.getItem(activeChatKey) || '[]');
-        if (!Array.isArray(messages)) messages = [];
-      } catch {
-        messages = [];
-      }
-
       if (messages.length === 0) {
         const emptyMessage = document.createElement('p');
         emptyMessage.className = 'chat-note';
@@ -625,10 +629,19 @@
       chatHistory.scrollTop = chatHistory.scrollHeight;
     }
 
+    async function loadChatHistory() {
+      if (!activeChat) return;
+      const { data, error } = await supabaseClient.functions.invoke('student-chat', {
+        body: { action: 'load', className: activeChat.className, regNo: activeChat.regNo }
+      });
+      if (error) throw error;
+      renderChatHistory(data.messages || []);
+    }
+
     document.getElementById('openChat').addEventListener('click', () => {
       chatPanel.classList.add('is-open');
       document.getElementById('openChat').setAttribute('aria-expanded', 'true');
-      if (!activeChatKey) chatRegNo.focus();
+      if (!activeChat) chatClass.focus();
       else chatMessageInput.focus();
     });
 
@@ -641,53 +654,61 @@
       chatRegNo.value = chatRegNo.value.replace(/\p{L}/gu, '');
     });
 
-    chatIdentityForm.addEventListener('submit', (event) => {
+    chatIdentityForm.addEventListener('submit', async (event) => {
       event.preventDefault();
-      const regNo = chatRegNo.value.trim();
-      if (!regNo) return;
+      const regNo = normalizeRegistrationNumber(chatRegNo.value);
+      const className = chatClass.value;
+      if (!regNo || !className || !supabaseClient) return;
 
-      activeChatKey = `registration-chat:${regNo}`;
-      chatAccount.textContent = `Chat for Reg no. ${regNo}`;
-      chatIdentityForm.hidden = true;
-      chatConversation.hidden = false;
-      showChatHistory();
-      chatMessageInput.focus();
+      chatIdentityStatus.textContent = 'Checking registration...';
+      try {
+        const { data, error } = await supabaseClient.functions.invoke('student-chat', {
+          body: { action: 'load', className, regNo }
+        });
+        if (error) throw error;
+        activeChat = { className, regNo };
+        chatAccount.textContent = `Class ${className}, Reg no. ${regNo}`;
+        chatIdentityForm.hidden = true;
+        chatConversation.hidden = false;
+        renderChatHistory(data.messages || []);
+        chatMessageInput.focus();
+      } catch (error) {
+        console.error('Chat could not be loaded:', error);
+        chatIdentityStatus.textContent = 'Could not verify this class and Reg no. Check them and try again.';
+      }
     });
 
-    chatMessageForm.addEventListener('submit', (event) => {
+    chatMessageForm.addEventListener('submit', async (event) => {
       event.preventDefault();
       const message = chatMessageInput.value.trim();
-      if (!message || !activeChatKey) return;
-
-      let messages = [];
+      if (!message || !activeChat) return;
       try {
-        messages = JSON.parse(localStorage.getItem(activeChatKey) || '[]');
-        if (!Array.isArray(messages)) messages = [];
-      } catch {
-        messages = [];
+        const { error } = await supabaseClient.functions.invoke('student-chat', {
+          body: { action: 'send', className: activeChat.className, regNo: activeChat.regNo, message }
+        });
+        if (error) throw error;
+        chatMessageInput.value = '';
+        await loadChatHistory();
+      } catch (error) {
+        console.error('Chat message could not be sent:', error);
+        chatAccount.textContent = 'Could not send your message. Please try again.';
       }
-      messages.push({ sender: 'visitor', text: message, time: Date.now() });
-      try {
-        localStorage.setItem(activeChatKey, JSON.stringify(messages));
-      } catch {
-        chatAccount.textContent = 'Could not save chat history in this browser.';
-      }
-      chatMessageInput.value = '';
-      showChatHistory();
       chatMessageInput.focus();
     });
 
     document.getElementById('changeChatRegNo').addEventListener('click', () => {
-      activeChatKey = '';
+      activeChat = null;
       chatConversation.hidden = true;
       chatIdentityForm.hidden = false;
+      chatIdentityStatus.textContent = 'Choose your class and enter your Reg no. to open your chat.';
+      chatClass.value = '';
       chatRegNo.value = '';
-      chatRegNo.focus();
+      chatClass.focus();
     });
 
-    window.addEventListener('storage', (event) => {
-      if (event.key === activeChatKey && activeChatKey) showChatHistory();
-    });
+    window.setInterval(() => {
+      if (activeChat) loadChatHistory().catch((error) => console.error('Chat refresh failed:', error));
+    }, 5000);
   </script>
 </body>
 </html>
