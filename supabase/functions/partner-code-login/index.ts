@@ -1,7 +1,7 @@
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { createClient } from 'npm:@supabase/supabase-js@2';
 
-const allowedOrigin = 'https://ks0869pp-creator.github.io';
-const redirectTo = 'https://ks0869pp-creator.github.io/Report-Card/support.html';
+const allowedOrigin = 'https://saps-bokaro.github.io';
+const redirectTo = 'https://saps-bokaro.github.io/Report-Card/support.html';
 const corsHeaders = {
   'Access-Control-Allow-Origin': allowedOrigin,
   'Access-Control-Allow-Headers': 'apikey, content-type',

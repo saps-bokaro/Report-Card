@@ -35,20 +35,21 @@ Open `index.html` in a browser.
 			updated_at = now();
 	```
 
-4. Add `https://ks0869pp-creator.github.io/Report-Card/support.html` to **Authentication → URL Configuration → Redirect URLs**.
+4. Add `https://saps-bokaro.github.io/Report-Card/support.html` to **Authentication → URL Configuration → Redirect URLs**.
 5. Deploy the login function from this repository:
 
 	```sh
 	supabase login
 	supabase link --project-ref knjrhohyesqxsoessmnr
-	supabase functions deploy partner-code-login --no-verify-jwt
+	supabase functions deploy partner-code-login --no-verify-jwt --use-api
+	supabase functions deploy student-chat --no-verify-jwt --use-api
 	```
 
-	The function uses Supabase's server-side `SUPABASE_SERVICE_ROLE_KEY`; never put that key or the shared code in `index.html`.
-6. Publish the latest `index.html` to GitHub Pages.
+	Both functions use Supabase's server-side `SUPABASE_SERVICE_ROLE_KEY`; never put that key or the shared code in `index.html`.
+6. Publish the latest `index.html` and `support.html` to GitHub Pages.
 
 Partner PDF uploads are stored in the `student-documents` bucket, and links are saved in `registrations.url`. The bucket is public so students can open documents from the registration page. Anyone who gets a document URL can view it; do not use this setup for confidential records.
 
 ## Note
 
-Chat messages are still stored in browser local storage and are not shared between devices.
+Chat messages are stored in Supabase and shared across devices. Existing local chats are imported by the support inbox when their registration number matches one registration. Students identify chats with class and registration number; this is a basic record match, not strong identity verification. Do not use chat for sensitive information without adding a stronger verification method.

@@ -419,21 +419,38 @@
       return value.trim().replace(/[\u2010-\u2015\u2212]/g, '-');
     }
 
+    const allowedChatClassPattern = /^XII\/[A-K]$/i;
+
+    function populateChatClasses(rows) {
+      const allowedRows = (rows || []).filter((row) => {
+        const className = String(row.class_name || '').trim();
+        return allowedChatClassPattern.test(className);
+      });
+
+      chatClassInput.replaceChildren(new Option('Select a class', ''));
+      for (const row of allowedRows) {
+        chatClassInput.add(new Option(row.class_name, row.class_name));
+      }
+
+      if (allowedRows.length === 0) {
+        chatClassInput.replaceChildren(new Option('No help-chat classes available', ''));
+      }
+    }
+
     async function loadClasses() {
       try {
         const { data, error } = await supabaseClient.rpc('list_registration_classes');
         if (error) throw error;
 
         classInput.replaceChildren(new Option('Select a class', ''));
-        chatClassInput.replaceChildren(new Option('Select a class', ''));
         for (const row of data || []) {
           classInput.add(new Option(row.class_name, row.class_name));
-          chatClassInput.add(new Option(row.class_name, row.class_name));
         }
+        populateChatClasses(data);
       } catch (error) {
         console.error('Class list could not be loaded:', error);
         classInput.replaceChildren(new Option('Could not load classes', ''));
-        chatClassInput.replaceChildren(new Option('Could not load classes', ''));
+        populateChatClasses([]);
       }
     }
 
@@ -612,18 +629,28 @@
 
     function renderChatHistory(messages) {
       chatHistory.replaceChildren();
-      if (messages.length === 0) {
+      const list = Array.isArray(messages) ? messages : [];
+      if (list.length === 0) {
         const emptyMessage = document.createElement('p');
         emptyMessage.className = 'chat-note';
         emptyMessage.textContent = 'No messages yet. Start the conversation below.';
         chatHistory.append(emptyMessage);
+        chatHistory.scrollTop = 0;
+        return;
       }
 
-      messages.forEach((message) => {
+      list.forEach((message) => {
         const isSupport = typeof message === 'object' && message.sender === 'support';
+        const messageText = typeof message === 'string'
+          ? message
+          : (typeof message?.message === 'string'
+            ? message.message
+            : (typeof message?.text === 'string' ? message.text : ''));
+        if (!messageText.trim()) return;
+
         const bubble = document.createElement('p');
         bubble.className = `chat-message${isSupport ? '' : ' visitor'}`;
-        bubble.textContent = typeof message === 'string' ? message : message.text;
+        bubble.textContent = messageText;
         chatHistory.append(bubble);
       });
       chatHistory.scrollTop = chatHistory.scrollHeight;
@@ -659,6 +686,11 @@
       const regNo = normalizeRegistrationNumber(chatRegNo.value);
       const className = chatClass.value;
       if (!regNo || !className || !supabaseClient) return;
+
+      if (!allowedChatClassPattern.test(className)) {
+        chatIdentityStatus.textContent = 'Help chat is only available for classes XII/A to XII/K.';
+        return;
+      }
 
       chatIdentityStatus.textContent = 'Checking registration...';
       try {
