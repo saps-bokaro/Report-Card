@@ -630,6 +630,8 @@
     function renderChatHistory(messages) {
       chatHistory.replaceChildren();
       const list = Array.isArray(messages) ? messages : [];
+      chatHistory._messages = list;
+
       if (list.length === 0) {
         const emptyMessage = document.createElement('p');
         emptyMessage.className = 'chat-note';
@@ -662,7 +664,8 @@
         body: { action: 'load', className: activeChat.className, regNo: activeChat.regNo }
       });
       if (error) throw error;
-      renderChatHistory(data.messages || []);
+      const messages = Array.isArray(data?.messages) ? data.messages : [];
+      renderChatHistory(messages);
     }
 
     document.getElementById('openChat').addEventListener('click', () => {
@@ -702,7 +705,7 @@
         chatAccount.textContent = `Class ${className}, Reg no. ${regNo}`;
         chatIdentityForm.hidden = true;
         chatConversation.hidden = false;
-        renderChatHistory(data.messages || []);
+        renderChatHistory(Array.isArray(data?.messages) ? data.messages : []);
         chatMessageInput.focus();
       } catch (error) {
         console.error('Chat could not be loaded:', error);
@@ -714,15 +717,25 @@
       event.preventDefault();
       const message = chatMessageInput.value.trim();
       if (!message || !activeChat) return;
+
+      const optimisticMessage = { sender: 'visitor', message };
+      const currentMessages = Array.isArray(chatHistory._messages) ? chatHistory._messages.slice() : [];
+      renderChatHistory([...currentMessages, optimisticMessage]);
+      chatMessageInput.value = '';
+
       try {
         const { error } = await supabaseClient.functions.invoke('student-chat', {
           body: { action: 'send', className: activeChat.className, regNo: activeChat.regNo, message }
         });
         if (error) throw error;
-        chatMessageInput.value = '';
         await loadChatHistory();
       } catch (error) {
         console.error('Chat message could not be sent:', error);
+        const failedMessages = (Array.isArray(chatHistory._messages) ? chatHistory._messages : []).filter((item) => {
+          if (typeof item === 'string') return true;
+          return item?.message !== message || item?.sender !== 'visitor';
+        });
+        renderChatHistory(failedMessages);
         chatAccount.textContent = 'Could not send your message. Please try again.';
       }
       chatMessageInput.focus();
