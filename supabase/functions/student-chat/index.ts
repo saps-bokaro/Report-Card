@@ -50,12 +50,8 @@ Deno.serve(async (request) => {
   const action = requestData.action;
   const regNo = typeof requestData.regNo === 'string' ? requestData.regNo.trim() : '';
   const className = typeof requestData.className === 'string' ? requestData.className.trim() : '';
-  const allowedChatClassPattern = /^XII\/[A-K]$/i;
   if ((action !== 'load' && action !== 'send') || !regNo || regNo.length > 100 || !className || className.length > 100) {
     return jsonResponse({ error: 'Enter a valid class and registration number.' }, 400);
-  }
-  if (!allowedChatClassPattern.test(className)) {
-    return jsonResponse({ error: 'Help chat is only available for classes XII/A to XII/K.' }, 400);
   }
 
   const supabase = createClient(supabaseUrl, serviceRoleKey, {
@@ -63,15 +59,6 @@ Deno.serve(async (request) => {
   });
 
   try {
-    const { data: registration, error: registrationError } = await supabase
-      .from('registrations')
-      .select('reg_no, class_name')
-      .eq('reg_no', regNo)
-      .eq('class_name', className)
-      .maybeSingle();
-    if (registrationError) throw registrationError;
-    if (!registration) return jsonResponse({ error: 'Registration not found.' }, 404);
-
     if (action === 'load') {
       const pageSize = 1000;
       const messages = [];

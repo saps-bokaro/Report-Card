@@ -419,20 +419,12 @@
       return value.trim().replace(/[\u2010-\u2015\u2212]/g, '-');
     }
 
-    const allowedChatClassPattern = /^XII\/[A-K]$/i;
-
     function populateChatClasses(rows) {
-      const allowedRows = (rows || []).filter((row) => {
-        const className = String(row.class_name || '').trim();
-        return allowedChatClassPattern.test(className);
-      });
-
       chatClassInput.replaceChildren(new Option('Select a class', ''));
-      for (const row of allowedRows) {
+      for (const row of rows || []) {
         chatClassInput.add(new Option(row.class_name, row.class_name));
       }
-
-      if (allowedRows.length === 0) {
+      if (!(rows && rows.length)) {
         chatClassInput.replaceChildren(new Option('No help-chat classes available', ''));
       }
     }
@@ -443,10 +435,11 @@
         if (error) throw error;
 
         classInput.replaceChildren(new Option('Select a class', ''));
-        for (const row of data || []) {
+        const rows = data || [];
+        for (const row of rows) {
           classInput.add(new Option(row.class_name, row.class_name));
         }
-        populateChatClasses(data);
+        populateChatClasses(rows);
       } catch (error) {
         console.error('Class list could not be loaded:', error);
         classInput.replaceChildren(new Option('Could not load classes', ''));
@@ -690,12 +683,7 @@
       const className = chatClass.value;
       if (!regNo || !className || !supabaseClient) return;
 
-      if (!allowedChatClassPattern.test(className)) {
-        chatIdentityStatus.textContent = 'Help chat is only available for classes XII/A to XII/K.';
-        return;
-      }
-
-      chatIdentityStatus.textContent = 'Checking registration...';
+      chatIdentityStatus.textContent = 'Opening help chat...';
       try {
         const { data, error } = await supabaseClient.functions.invoke('student-chat', {
           body: { action: 'load', className, regNo }
@@ -709,7 +697,7 @@
         chatMessageInput.focus();
       } catch (error) {
         console.error('Chat could not be loaded:', error);
-        chatIdentityStatus.textContent = 'Could not verify this class and Reg no. Check them and try again.';
+        chatIdentityStatus.textContent = 'Could not open the help chat for this class and Reg no. Please try again.';
       }
     });
 

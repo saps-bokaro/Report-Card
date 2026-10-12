@@ -31,10 +31,19 @@
     .subtle { color: #687386; line-height: 1.5; }
     #chatList { display: grid; gap: 8px; margin-top: 24px; }
     .chat-select {
+      display: flex; align-items: center; justify-content: space-between; gap: 10px;
       width: 100%; padding: 12px; border: 1px solid #e7eaf2; border-radius: 10px;
       background: #fff; color: #172033; text-align: left; cursor: pointer;
     }
     .chat-select[aria-current="true"] { border-color: #5c6ac4; background: #f4f5ff; }
+    .chat-select-label { flex: 1; min-width: 0; }
+    .chat-unread-dot {
+      display: inline-block; width: 10px; height: 10px; border-radius: 999px;
+      background: #e11d48; box-shadow: 0 0 0 2px rgba(225, 29, 72, 0.18); opacity: 0;
+      transition: opacity 0.15s ease;
+      flex-shrink: 0;
+    }
+    .chat-select.has-unread .chat-unread-dot { opacity: 1; }
     .chat-group { min-width: 0; }
     .chat-group-title { margin: 16px 0 8px; color: #687386; font-size: .82rem; font-weight: 700; }
     .chat-group-list { display: grid; gap: 8px; }
@@ -153,6 +162,35 @@
     let activeChat = null;
     let activeDocumentUrl = '';
     let legacyImportComplete = false;
+
+    function getUnreadStorageKey() {
+      return 'support-chat-last-read';
+    }
+
+    function getUnreadMap() {
+      try {
+        const raw = localStorage.getItem(getUnreadStorageKey());
+        const parsed = raw ? JSON.parse(raw) : {};
+        return parsed && typeof parsed === 'object' ? parsed : {};
+      } catch {
+        return {};
+      }
+    }
+
+    function setChatRead(regNo, className) {
+      const key = `${className}\u0000${regNo}`;
+      const state = getUnreadMap();
+      state[key] = Date.now();
+      localStorage.setItem(getUnreadStorageKey(), JSON.stringify(state));
+    }
+
+    function isChatUnread(regNo, className, lastMessageAt) {
+      if (!lastMessageAt) return false;
+      const key = `${className}\u0000${regNo}`;
+      const state = getUnreadMap();
+      const lastReadAt = Number(state[key] || 0);
+      return Date.parse(lastMessageAt) > lastReadAt;
+    }
 
     async function renderDocumentManager() {
       documentManager.hidden = !activeChat;
@@ -336,6 +374,7 @@
         messages.append(failed);
         return;
       }
+      setChatRead(selectedChat.regNo, selectedChat.className);
       if (!history || !history.length) {
         const empty = document.createElement('p');
         empty.className = 'empty';
@@ -368,6 +407,21 @@
         noChats.hidden = false;
         return;
       }
+
+      const { data: recentMessages, error: recentMessagesError } = await supabaseClient
+        .from('chat_messages')
+        .select('reg_no, class_name, sender, created_at')
+        .order('created_at', { ascending: false });
+      const latestByChat = new Map();
+      if (!recentMessagesError && recentMessages) {
+        for (const item of recentMessages) {
+          const key = `${item.class_name}\u0000${item.reg_no}`;
+          if (!latestByChat.has(key)) {
+            latestByChat.set(key, item);
+          }
+        }
+      }
+
       chatList.replaceChildren();
       noChats.hidden = registrations.length > 0;
       noChats.textContent = 'No registrations found.';
@@ -388,13 +442,27 @@
 
         const selected = activeChat?.regNo === registration.reg_no
           && activeChat?.className === registration.class_name;
+        const latestMessage = latestByChat.get(`${registration.class_name}\u0000${registration.reg_no}`);
+        const unread = !selected && latestMessage && latestMessage.sender === 'visitor' && isChatUnread(registration.reg_no, registration.class_name, latestMessage.created_at);
+
         const button = document.createElement('button');
-        button.className = 'chat-select';
+        button.className = `chat-select${unread ? ' has-unread' : ''}`;
         button.type = 'button';
-        button.textContent = `Reg no. ${registration.reg_no}`;
         button.setAttribute('aria-current', String(selected));
+
+        const label = document.createElement('span');
+        label.className = 'chat-select-label';
+        label.textContent = `Reg no. ${registration.reg_no}`;
+
+        const dot = document.createElement('span');
+        dot.className = 'chat-unread-dot';
+        dot.setAttribute('aria-hidden', 'true');
+        dot.title = 'Unread message';
+
+        button.append(label, dot);
         button.addEventListener('click', () => {
           activeChat = { regNo: registration.reg_no, className: registration.class_name };
+          setChatRead(registration.reg_no, registration.class_name);
           title.textContent = `Class ${registration.class_name}, Reg no. ${registration.reg_no}`;
           replyForm.hidden = false;
           renderChatList();
