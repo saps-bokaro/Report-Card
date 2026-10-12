@@ -422,11 +422,26 @@
         }
       }
 
+      const chatEntries = new Map();
+      for (const registration of registrations || []) {
+        chatEntries.set(`${registration.class_name}\u0000${registration.reg_no}`, registration);
+      }
+      for (const chat of latestByChat.values()) {
+        const key = `${chat.class_name}\u0000${chat.reg_no}`;
+        if (!chatEntries.has(key)) {
+          chatEntries.set(key, { reg_no: chat.reg_no, class_name: chat.class_name });
+        }
+      }
+      const sortedChats = [...chatEntries.values()].sort((first, second) =>
+        (first.class_name || '').localeCompare(second.class_name || '')
+        || first.reg_no.localeCompare(second.reg_no)
+      );
+
       chatList.replaceChildren();
-      noChats.hidden = registrations.length > 0;
-      noChats.textContent = 'No registrations found.';
+      noChats.hidden = sortedChats.length > 0;
+      noChats.textContent = 'No registrations or chats found.';
       let currentGroup = null;
-      for (const registration of registrations) {
+      for (const registration of sortedChats) {
         if (!currentGroup || currentGroup.className !== registration.class_name) {
           const group = document.createElement('section');
           group.className = 'chat-group';

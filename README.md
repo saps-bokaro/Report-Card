@@ -52,4 +52,4 @@ Partner PDF uploads are stored in the `student-documents` bucket, and links are 
 
 ## Note
 
-Chat messages are stored in Supabase and shared across devices. Existing local chats are imported by the support inbox when their registration number matches one registration. Students identify chats with class and registration number; this is a basic record match, not strong identity verification. Do not use chat for sensitive information without adding a stronger verification method.
+Chat messages are stored in Supabase and shared across devices. Existing local chats are imported by the support inbox when their registration number matches one registration. Visitors can chat using any registration number with a help-chat class from XII/A through XII/K; the number is only a chat label, not identity verification. Anyone who guesses a class and registration number can read and send messages in that chat. Do not use chat for sensitive information without adding a stronger verification method.

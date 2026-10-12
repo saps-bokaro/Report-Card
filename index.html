@@ -409,6 +409,10 @@
     const classInput = document.getElementById('classInput');
     const chatClassInput = document.getElementById('chatClassInput');
     const regNoInput = document.getElementById('regNoInput');
+    const helpChatClasses = [
+      'XII/A', 'XII/B', 'XII/C', 'XII/D', 'XII/E', 'XII/F',
+      'XII/G', 'XII/H', 'XII/I', 'XII/J', 'XII/K'
+    ];
     const supabaseUrl = 'https://knjrhohyesqxsoessmnr.supabase.co';
     const supabasePublishableKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtuanJob2h5ZXNxeHNvZXNzbW5yIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTA2NzAxNDQsImV4cCI6MjEwNjI0NjE0NH0.rI26D8ZACBDkKtQ7slJE3kOhDeV3LXfRT7astsPo61o';
     const supabaseClient = supabaseUrl && supabasePublishableKey
@@ -419,15 +423,14 @@
       return value.trim().replace(/[\u2010-\u2015\u2212]/g, '-');
     }
 
-    function populateChatClasses(rows) {
+    function populateChatClasses() {
       chatClassInput.replaceChildren(new Option('Select a class', ''));
-      for (const row of rows || []) {
-        chatClassInput.add(new Option(row.class_name, row.class_name));
-      }
-      if (!(rows && rows.length)) {
-        chatClassInput.replaceChildren(new Option('No help-chat classes available', ''));
+      for (const className of helpChatClasses) {
+        chatClassInput.add(new Option(className, className));
       }
     }
+
+    populateChatClasses();
 
     async function loadClasses() {
       try {
@@ -439,11 +442,9 @@
         for (const row of rows) {
           classInput.add(new Option(row.class_name, row.class_name));
         }
-        populateChatClasses(rows);
       } catch (error) {
         console.error('Class list could not be loaded:', error);
         classInput.replaceChildren(new Option('Could not load classes', ''));
-        populateChatClasses([]);
       }
     }
 
